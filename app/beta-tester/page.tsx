@@ -19,6 +19,9 @@ export default function BetaTesterPage() {
   const [freeTokens, setFreeTokens] = useState(1000);
   const [isRegistered, setIsRegistered] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [maxBetaTesters, setMaxBetaTesters] = useState<number | null>(null);
+  const [currentBetaTesterCount, setCurrentBetaTesterCount] = useState<number>(0);
+  const [isFull, setIsFull] = useState(false);
 
   // Check registration status and settings
   useEffect(() => {
@@ -39,6 +42,22 @@ export default function BetaTesterPage() {
         const tokens = await getBetaTesterFreeTokens();
         setFreeTokens(tokens);
 
+        // Get max beta testers limit
+        const maxLimit = await getMaxBetaTesters();
+        setMaxBetaTesters(maxLimit);
+
+        // Check current beta tester count if limit is set
+        if (maxLimit !== null && maxLimit > 0 && db) {
+          const betaTestersCollection = collection(db, "betaTesters");
+          const countSnapshot = await getCountFromServer(betaTestersCollection);
+          const currentCount = countSnapshot.data().count;
+          setCurrentBetaTesterCount(currentCount);
+          
+          if (currentCount >= maxLimit) {
+            setIsFull(true);
+          }
+        }
+
         // Check if user is already registered
         if (user && db) {
           const currentUser = auth?.currentUser;
@@ -58,6 +77,32 @@ export default function BetaTesterPage() {
 
     checkStatus();
   }, [user]);
+
+  // Re-check max beta testers when user logs in
+  useEffect(() => {
+    if (user && db && !isRegistered) {
+      const recheckLimit = async () => {
+        try {
+          const maxLimit = await getMaxBetaTesters();
+          if (maxLimit !== null && maxLimit > 0) {
+            const betaTestersCollection = collection(db, "betaTesters");
+            const countSnapshot = await getCountFromServer(betaTestersCollection);
+            const currentCount = countSnapshot.data().count;
+            setCurrentBetaTesterCount(currentCount);
+            
+            if (currentCount >= maxLimit) {
+              setIsFull(true);
+            } else {
+              setIsFull(false);
+            }
+          }
+        } catch (error) {
+          console.error("Error rechecking limit:", error);
+        }
+      };
+      recheckLimit();
+    }
+  }, [user, isRegistered]);
 
   const handleRegister = async () => {
     if (!user) {
@@ -98,16 +143,19 @@ export default function BetaTesterPage() {
         return;
       }
 
-      // Check max beta testers limit
+      // Check max beta testers limit BEFORE registering
       const maxBetaTesters = await getMaxBetaTesters();
       if (maxBetaTesters !== null && maxBetaTesters > 0) {
-        // Count current beta testers
+        // Count current beta testers (including this user if they're about to register)
         const betaTestersCollection = collection(db, "betaTesters");
         const countSnapshot = await getCountFromServer(betaTestersCollection);
         const currentCount = countSnapshot.data().count;
 
+        // Check if adding this user would exceed the limit
         if (currentCount >= maxBetaTesters) {
-          setError(`Beta tester registration is full. Maximum ${maxBetaTesters} beta tester${maxBetaTesters !== 1 ? 's' : ''} allowed.`);
+          setError(`Beta tester registration is full. Maximum ${maxBetaTesters} beta tester${maxBetaTesters !== 1 ? 's' : ''} allowed. Currently ${currentCount} registered.`);
+          setIsFull(true);
+          setCurrentBetaTesterCount(currentCount);
           setLoading(false);
           return;
         }
@@ -187,6 +235,33 @@ export default function BetaTesterPage() {
     );
   }
 
+  if (isFull) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#101022] p-4">
+        <div className="w-full max-w-md rounded-xl bg-[#242424] p-8 shadow-2xl border border-white/10">
+          <div className="text-center">
+            <span className="material-symbols-outlined text-6xl text-white/30 mb-4 block">
+              group_remove
+            </span>
+            <h1 className="text-2xl font-bold text-white mb-2">Registration Full</h1>
+            <p className="text-white/70 mb-2">
+              Beta tester registration is full.
+            </p>
+            <p className="text-white/50 text-sm">
+              Maximum {maxBetaTesters} beta tester{maxBetaTesters !== 1 ? 's' : ''} allowed. Currently {currentBetaTesterCount} registered.
+            </p>
+            <button
+              onClick={() => router.push("/")}
+              className="mt-6 w-full py-3 px-6 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Go to Home
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#101022] p-4">
       <div className="w-full max-w-md rounded-xl bg-[#242424] p-8 shadow-2xl border border-white/10">
@@ -254,13 +329,18 @@ export default function BetaTesterPage() {
                   Please login first to register as a beta tester
                 </p>
                 <button
-                  onClick={async () => {
+                  type="button"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     try {
                       setSigningIn(true);
                       setError("");
-                      await signInWithGoogle(false);
-                      // User will be automatically updated via AuthContext
-                      // No need to redirect, the component will re-render
+                      const result = await signInWithGoogle(false);
+                      if (result) {
+                        // User signed in successfully, component will re-render via AuthContext
+                        console.log("User signed in successfully");
+                      }
                     } catch (error: any) {
                       console.error("Error signing in:", error);
                       setError(error.message || "Failed to sign in with Google. Please try again.");
