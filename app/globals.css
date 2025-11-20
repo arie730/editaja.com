@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0d0df2;
+  --color-background-light: #f5f5f8;
+  --color-background-dark: #111118;
+  
+  --radius: 1rem;
+  --radius-lg: 2rem;
+  --radius-xl: 3rem;
+  --radius-full: 9999px;
+}
+
+body {
+  font-family: var(--font-display), "Space Grotesk", sans-serif;
+}
+
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  transition: color 0.25s ease, font-variation-settings 0.25s ease, transform 0.15s ease;
+}
+
+/* Favorite icon styles */
+.favorite-icon-gray {
+  color: #9ca3af; /* abu-abu Tailwind gray-400 */
+}
+
+.favorite-icon-filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  color: #ef4444; /* merah Tailwind red-500 */
+  transform: scale(1.1);
+}
+
+.favorite-icon-click-pop {
+  transform: scale(0.9);
+}
+
+.material-symbols-filled {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  font-family: 'Material Symbols Outlined';
+}
+
+/* Form input styling */
+.form-input {
+  transition: all 0.2s;
+}
+
+.form-input:focus {
+  outline: none;
+}
+
+/* Checkbox styling */
+.form-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.form-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}

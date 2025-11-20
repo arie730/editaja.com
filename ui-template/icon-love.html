@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Favorite Button - Abu abu ke Merah</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Material Symbols (var-font dengan dukungan FILL) -->
+  <link
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:FILL@0..1"
+    rel="stylesheet"
+  />
+
+  <style>
+    .material-symbols-outlined {
+      font-family: "Material Symbols Outlined";
+      font-weight: normal;
+      font-style: normal;
+      font-size: 24px;
+      line-height: 1;
+      display: inline-block;
+      -webkit-font-feature-settings: "liga";
+      -webkit-font-smoothing: antialiased;
+      font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+      transition: color 0.25s ease, font-variation-settings 0.25s ease, transform 0.15s ease;
+    }
+
+    /* Saat belum diklik */
+    .gray {
+      color: #9ca3af; /* abu-abu Tailwind gray-400 */
+    }
+
+    /* Saat diklik */
+    .filled {
+      font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+      color: #ef4444; /* merah Tailwind red-500 */
+      transform: scale(1.1);
+    }
+
+    /* Efek klik cepat */
+    .click-pop {
+      transform: scale(0.9);
+    }
+  </style>
+</head>
+<body class="bg-neutral-900 flex items-center justify-center min-h-screen">
+
+  <button
+    id="favBtn"
+    class="w-10 h-10 flex items-center justify-center rounded-full bg-black/70 hover:bg-black/80 transition"
+    title="Suka"
+    type="button"
+  >
+    <span id="favIcon" class="material-symbols-outlined text-3xl gray">
+      favorite
+    </span>
+  </button>
+
+  <script>
+    const btn = document.getElementById("favBtn");
+    const icon = document.getElementById("favIcon");
+    let liked = false;
+
+    btn.addEventListener("click", () => {
+      liked = !liked;
+
+      // animasi kecil waktu klik
+      icon.classList.add("click-pop");
+      setTimeout(() => icon.classList.remove("click-pop"), 100);
+
+      // toggle warna & style
+      icon.classList.toggle("filled", liked);
+      icon.classList.toggle("gray", !liked);
+    });
+  </script>
+</body>
+</html>

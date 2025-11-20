@@ -1,0 +1,32 @@
+1. Ambil list file untuk ditampilkan
+
+Contoh fetch dari Next.js / React:
+
+async function getImages() {
+  const res = await fetch("https://gambar.editaja.com/list.php", {
+    headers: {
+      Authorization: "TOKEN-RAHASIA-KAMU"
+    }
+  });
+
+  const data = await res.json();
+  return data.data;
+}
+
+🟣 2. Delete gambar langsung dari editaja.com
+async function deleteImage(id) {
+  await fetch("https://gambar.editaja.com/delete.php", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "TOKEN-RAHASIA-KAMU"
+    },
+    body: JSON.stringify({ id })
+  });
+}
+
+🟣 3. Download FULL image
+
+Gunakan URL yang diberikan:
+
+https://gambar.editaja.com/uploads/original/{file}

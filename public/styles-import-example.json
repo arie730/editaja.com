@@ -1,0 +1,31 @@
+[
+  {
+    "prompt": "A beautiful sunset over a calm ocean with vibrant orange and pink colors reflecting on the water",
+    "imageUrl": "https://example.com/sunset-ocean.jpg",
+    "status": "Active",
+    "tags": ["nature", "sunset", "ocean", "landscape"]
+  },
+  {
+    "prompt": "Modern cityscape at night with neon lights and bustling streets",
+    "imageUrl": "https://example.com/city-night.jpg",
+    "status": "Active",
+    "tags": ["urban", "city", "night", "neon"]
+  },
+  {
+    "prompt": "Abstract geometric patterns with vibrant colors and clean lines",
+    "imageUrl": "https://example.com/abstract-geometric.jpg",
+    "status": "Active",
+    "tags": ["abstract", "geometric", "modern", "art"]
+  },
+  {
+    "prompt": "Vintage retro style with warm tones and nostalgic atmosphere",
+    "imageUrl": "https://example.com/retro-vintage.jpg",
+    "status": "Inactive",
+    "tags": ["vintage", "retro", "nostalgic"]
+  }
+]
+
+
+
+
+

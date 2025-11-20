@@ -1,0 +1,125 @@
+==========================================
+FIREBASE RULES - COPY PASTE READY
+==========================================
+
+1. FIRESTORE RULES
+   (Firebase Console > Firestore Database > Rules)
+==========================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Users collection - users can read/write their own data, admins can read all
+    match /users/{userId} {
+      // Users can read their own data
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Admins can read all users
+      allow read: if isAdmin();
+      
+      // Users can write their own data
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Admins collection
+    match /admins/{adminId} {
+      // Allow users to read their own admin document (to check if they are admin)
+      allow read: if request.auth != null && request.auth.uid == adminId;
+      
+      // Only existing admins can read other admin documents
+      allow read: if isAdmin();
+      
+      // Only allow creation through admin setup or script (for development)
+      // In production, you should restrict this further
+      allow create: if request.auth != null;
+      
+      // Only admins can update/delete admin documents
+      allow update, delete: if isAdmin();
+    }
+    
+    // Styles collection
+    match /styles/{styleId} {
+      // Everyone can read active styles (for public display)
+      allow read: if true;
+      
+      // Only admins can create, update, or delete styles
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Settings collection - admins can read/write, allow read for server-side API
+    match /settings/{settingId} {
+      // Allow read for everyone (needed for server-side API routes)
+      // API key is not highly sensitive for read-only access
+      allow read: if true;
+      
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+    
+    // Generations collection - users can read their own, admins can read all
+    match /generations/{generationId} {
+      // Allow read if user owns the generation (authenticated users)
+      allow read: if request.auth != null && 
+                     resource != null && 
+                     resource.data.userId == request.auth.uid;
+      
+      // Allow read for anonymous users' generations (anyone can read)
+      allow read: if resource != null && resource.data.userId == "anonymous";
+      
+      // Admins can read all generations
+      allow read: if isAdmin();
+      
+      // Authenticated users can create their own generations
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Anonymous users can create generations with userId "anonymous"
+      allow create: if request.resource.data.userId == "anonymous";
+      
+      // Only admins can update or delete
+      allow update, delete: if isAdmin();
+    }
+    
+    // Deny all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+
+==========================================
+CATATAN PENTING:
+==========================================
+
+⚠️ TIDAK PERLU SETUP STORAGE RULES
+- Aplikasi menggunakan LOCAL STORAGE (folder public/uploads/)
+- File disimpan di server lokal, BUKAN di Firebase Storage
+- Tidak perlu setup Firebase Storage Rules
+- Tidak perlu setup Firebase Storage CORS
+
+==========================================
+CARA MENGGUNAKAN:
+==========================================
+
+1. FIRESTORE RULES:
+   - Buka: Firebase Console > Firestore Database > Rules
+   - Copy bagian "1. FIRESTORE RULES" di atas (mulai dari rules_version sampai })
+   - Paste di editor
+   - Klik "Publish"
+
+2. STORAGE RULES:
+   - ❌ TIDAK PERLU - Aplikasi menggunakan local storage
+   - File disimpan di: public/uploads/{userId}/
+   - Tidak perlu setup Firebase Storage
+
+==========================================
+

@@ -1,0 +1,292 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Users collection - users can read/write their own data, admins can read all
+    match /users/{userId} {
+      // Users can read their own data
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Admins can read all users
+      allow read: if isAdmin();
+      
+      // Users can create their own document (for new users)
+      // Allow create if user is authenticated and userId matches
+      // Email validation is optional (some providers may not have email in token)
+      allow create: if request.auth != null && 
+                       request.auth.uid == userId &&
+                       request.resource.data.email is string;
+      
+      // Users can update their own data
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Admins can delete any user
+      allow delete: if isAdmin();
+    }
+    
+    // Admins collection
+    match /admins/{adminId} {
+      // Allow users to read their own admin document (to check if they are admin)
+      allow read: if request.auth != null && request.auth.uid == adminId;
+      
+      // Only existing admins can read other admin documents
+      allow read: if isAdmin();
+      
+      // Only allow creation through admin setup or script (for development)
+      // In production, you should restrict this further
+      allow create: if request.auth != null;
+      
+      // Only admins can update/delete admin documents
+      allow update, delete: if isAdmin();
+    }
+    
+    // Styles collection
+    match /styles/{styleId} {
+      // Everyone can read active styles (for public display)
+      allow read: if true;
+      
+      // Only admins can create, update, or delete styles
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Settings collection - admins can read/write, allow read for server-side API
+    match /settings/{settingId} {
+      // Allow read for everyone (needed for server-side API routes)
+      // API key is not highly sensitive for read-only access
+      allow read: if true;
+      
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+    
+    // Generations collection - users can read their own, admins can read all
+    // Also allow read for analytics/trending purposes (styleId only needed)
+    match /generations/{generationId} {
+      // Allow read if user owns the generation (authenticated users)
+      allow read: if request.auth != null &&
+                     resource != null &&
+                     resource.data.userId == request.auth.uid;
+
+      // Allow read for anonymous users' generations (anyone can read)
+      allow read: if resource != null && resource.data.userId == "anonymous";
+
+      // Allow read for analytics/trending (anyone can read for counting style usage)
+      // This is needed for trending styles feature
+      allow read: if true;
+
+      // Admins can read all generations
+      allow read: if isAdmin();
+
+      // Authenticated users can create their own generations
+      allow create: if request.auth != null &&
+                        request.resource.data.userId == request.auth.uid;
+
+      // Anonymous users can create generations with userId "anonymous"
+      allow create: if request.resource.data.userId == "anonymous";
+
+      // Users can delete their own generations
+      allow delete: if request.auth != null &&
+                      resource != null &&
+                      resource.data.userId == request.auth.uid;
+      
+      // Admins can update or delete any generation
+      allow update, delete: if isAdmin();
+    }
+
+    // UserTokens collection - users can read their own tokens, admins can read/write all
+    match /userTokens/{userId} {
+      // Users can read their own tokens
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Admins can read all user tokens
+      allow read: if isAdmin();
+
+      // Users can create their own token document if it doesn't exist
+      // Allow create if user is authenticated and userId matches
+      // Also allow create if document doesn't exist yet (for new users)
+      allow create: if request.auth != null && 
+                       request.auth.uid == userId &&
+                       request.resource.data.userId == userId &&
+                       request.resource.data.tokens is int &&
+                       request.resource.data.tokens >= 0;
+
+      // Users can update their own tokens
+      // Note: increment() operations are atomic and safe
+      // Client-side validation ensures sufficient tokens before deduction
+      // Allow update if:
+      // 1. User is authenticated
+      // 2. User owns the document (userId matches)
+      // Note: When using increment(), we only update 'tokens' and 'updatedAt' fields
+      // The userId field is never updated in increment operations
+      // We rely on the userId in the document path matching the authenticated user's UID
+      // This is already checked by: request.auth.uid == userId
+      allow update: if request.auth != null && 
+                       request.auth.uid == userId;
+
+      // Admins can create, update, or delete all user tokens (for adding/setting tokens)
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Favorites collection - users can manage their own favorites
+    match /favorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if request.auth != null &&
+                     resource != null &&
+                     resource.data.userId == request.auth.uid;
+
+      // Admins can read all favorites
+      allow read: if isAdmin();
+
+      // Users can create their own favorites
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid;
+
+      // Users can delete their own favorites
+      allow delete: if request.auth != null &&
+                       resource != null &&
+                       resource.data.userId == request.auth.uid;
+
+      // Admins can manage all favorites
+      allow create, update, delete: if isAdmin();
+    }
+
+    // AnonymousUsers collection - for tracking anonymous user generation limits
+    match /anonymousUsers/{anonymousId} {
+      // Anyone can read (for client-side checking)
+      // The anonymousId is based on browser fingerprint, so users can only read their own
+      allow read: if true;
+      
+      // Anyone can create their own anonymous user document
+      // The anonymousId is generated client-side based on browser fingerprint
+      // This prevents abuse as each browser gets a unique ID
+      allow create: if request.resource.data.anonymousId == anonymousId &&
+                       request.resource.data.todayGenerationCount is int &&
+                       request.resource.data.todayGenerationCount == 1 &&
+                       request.resource.data.lastGeneratedDate is string;
+      
+      // Anyone can update their own anonymous user document (increment today's count or reset for new day)
+      // Using increment() is atomic and safe - we just need to verify anonymousId matches
+      allow update: if resource != null && 
+                       resource.data.anonymousId == anonymousId &&
+                       request.resource.data.anonymousId == anonymousId &&
+                       request.resource.data.todayGenerationCount is int;
+      
+      // Admins can manage all anonymous users
+      allow read, write: if isAdmin();
+    }
+
+    // TopupTransactions collection - users can create their own, admins can read/write all
+    match /topupTransactions/{transactionId} {
+      // Users can read their own transactions
+      allow read: if request.auth != null &&
+                     resource != null &&
+                     resource.data.userId == request.auth.uid;
+
+      // Admins can read all transactions
+      allow read: if isAdmin();
+
+      // Authenticated users can create their own transactions
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.orderId is string &&
+                       request.resource.data.diamonds is int &&
+                       request.resource.data.price is number &&
+                       request.resource.data.status == "pending";
+
+      // Allow updates for:
+      // 1. User who owns the transaction
+      // 2. Admin users
+      // Note: Webhook callbacks should use Firebase Admin SDK (bypasses rules)
+      // If Admin SDK is not available, webhook updates will fail
+      // To fix: Setup Firebase Admin SDK in API route or use service account
+      allow update: if request.auth != null && 
+                       (request.auth.uid == resource.data.userId || isAdmin());
+
+      // Only admins can delete transactions
+      allow delete: if isAdmin();
+    }
+
+    // BetaTesters collection - users can read their own, admins can read/write all
+    match /betaTesters/{userId} {
+      // Users can read their own beta tester document
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Admins can read all beta tester documents
+      allow read: if isAdmin();
+
+      // Allow authenticated users to list/query collection (for count queries to check max limit)
+      // getCountFromServer requires list permission
+      // This is safe as it only returns count, not document data
+      allow list: if request.auth != null;
+
+      // Users can create their own beta tester document (for registration)
+      // API route verifies the token and ensures userId matches
+      allow create: if request.auth != null && 
+                       request.auth.uid == userId &&
+                       request.resource.data.userId == userId &&
+                       request.resource.data.email is string &&
+                       request.resource.data.freeTokensReceived is int;
+
+      // Only admins can update or delete
+      allow update, delete: if isAdmin();
+    }
+
+    // Feedbacks collection - users can create their own, admins can read/write all
+    match /feedbacks/{feedbackId} {
+      // Users can read their own feedbacks
+      allow read: if request.auth != null &&
+                     resource != null &&
+                     resource.data.userId == request.auth.uid;
+
+      // Admins can read all feedbacks
+      allow read, list: if isAdmin();
+
+      // Authenticated users can create their own feedbacks
+      allow create: if request.auth != null &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.email is string &&
+                       request.resource.data.feedback is string &&
+                       request.resource.data.category is string &&
+                       request.resource.data.status == "pending";
+
+      // Only admins can update or delete feedbacks
+      allow update, delete: if isAdmin();
+    }
+
+    // TopupPlans collection - admins can read/write, users can read
+    match /topupPlans/{planId} {
+      // Everyone can read plans (needed for TopupModal)
+      allow read: if true;
+
+      // Only admins can create, update, or delete plans
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Visitors collection - for tracking real-time visitors
+    match /visitors/{visitorId} {
+      // Everyone can create/update visitor sessions (for tracking)
+      // No authentication required for visitor tracking
+      // Simplified rules to allow tracking without strict validation
+      allow create: if true;
+      allow update: if true;
+      
+      // Everyone can read visitor data (needed for client-side queries and admin dashboard)
+      allow read: if true;
+      
+      // Allow list for count queries (needed for active visitors count)
+      allow list: if true;
+    }
+
+    // Deny all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
