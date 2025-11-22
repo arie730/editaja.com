@@ -60,8 +60,9 @@ export default function AdminDashboardPage() {
 
     loadDashboard();
 
-    // Refresh every 30 seconds
-    const interval = setInterval(loadDashboard, 30000);
+    // OPTIMIZED: Refresh every 2 minutes instead of 30 seconds to reduce quota usage
+    // Dashboard doesn't need to update every 30 seconds
+    const interval = setInterval(loadDashboard, 120000); // 2 minutes
     return () => clearInterval(interval);
   }, []);
 

@@ -120,18 +120,21 @@ export async function POST(request: NextRequest) {
       transaction = await getTopupTransactionByOrderIdServer(orderId);
     } catch (error: any) {
       // Handle quota exceeded errors specially
-      if (error.message?.includes("quota exceeded") || error.code === 8) {
+      if (error.message?.includes("quota exceeded") || error.code === 8 || error.message?.includes("RESOURCE_EXHAUSTED")) {
         console.error("❌ Firestore quota exceeded while getting transaction:", orderId);
         console.error("   This usually means Firestore free tier quota is exhausted.");
-        console.error("   Please upgrade Firestore plan or wait for quota reset.");
+        console.error("   Please upgrade Firestore plan to Blaze (pay-as-you-go) or wait for quota reset (daily).");
+        console.error(`   To manually retry later, use: /api/midtrans/retry-failed?orderId=${orderId}`);
         
-        // Return 200 but with error message so Midtrans doesn't retry immediately
-        // Midtrans will retry later automatically
+        // IMPORTANT: Return 200 to Midtrans so they don't retry immediately
+        // But log the error clearly for manual intervention
+        // The transaction will be retried when quota is available
         return NextResponse.json({ 
           ok: false, 
           error: "Firestore quota exceeded. Transaction will be processed when quota is available.",
           orderId,
-          retryAfter: 3600 // Suggest retry after 1 hour
+          retryAfter: 3600, // Suggest retry after 1 hour
+          retryUrl: `/api/midtrans/retry-failed?orderId=${orderId}`
         }, { status: 200 });
       }
       

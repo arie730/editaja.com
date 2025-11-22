@@ -28,7 +28,7 @@ export interface Visitor {
   isActive: boolean;
 }
 
-// Track a visitor (called from client-side)
+// Track a visitor (called from client-side) - OPTIMIZED: No getDoc needed
 export const trackVisitor = async (page: string, userId?: string): Promise<void> => {
   if (!db || typeof window === "undefined") {
     return;
@@ -54,31 +54,29 @@ export const trackVisitor = async (page: string, userId?: string): Promise<void>
       visitorData.userId = userId;
     }
 
-    // Save to Firestore client-side (for real-time updates)
-    // This is the primary tracking method
+    // OPTIMIZED: Use setDoc with merge instead of getDoc + setDoc
+    // This reduces 1 read operation per page load
+    // merge: true will update existing or create new document
     try {
       const visitorRef = doc(db, "visitors", sessionId);
-      const visitorSnap = await getDoc(visitorRef);
-
-      if (visitorSnap.exists()) {
-        // Update existing visitor
-        await setDoc(
-          visitorRef,
-          {
-            ...visitorData,
-            lastSeenAt: serverTimestamp(),
-            isActive: true,
-          },
-          { merge: true }
-        );
-      } else {
-        // Create new visitor
-        await setDoc(visitorRef, {
+      
+      // Check if this is first visit (by checking sessionStorage flag)
+      const isFirstVisit = !sessionStorage.getItem(`visitor_${sessionId}_initialized`);
+      
+      await setDoc(
+        visitorRef,
+        {
           ...visitorData,
-          createdAt: serverTimestamp(),
-          lastSeenAt: serverTimestamp(),
+          ...(isFirstVisit ? { createdAt: serverTimestamp() as any } : {}),
+          lastSeenAt: serverTimestamp() as any,
           isActive: true,
-        });
+        },
+        { merge: true }
+      );
+      
+      // Mark as initialized to avoid redundant createdAt updates
+      if (isFirstVisit) {
+        sessionStorage.setItem(`visitor_${sessionId}_initialized`, "true");
       }
     } catch (firestoreError: any) {
       console.error("Error saving visitor to Firestore:", firestoreError);
@@ -144,7 +142,9 @@ export const getActiveVisitorsCount = async (): Promise<number> => {
   }
 };
 
-// Subscribe to active visitors count (real-time)
+// Subscribe to active visitors count (real-time) - OPTIMIZED: Use polling instead of real-time listener
+// Real-time listener on all visitors is VERY expensive (reads all documents on every update)
+// Using polling with interval is much more quota-efficient
 export const subscribeToActiveVisitors = (
   callback: (count: number) => void
 ): (() => void) => {
@@ -153,31 +153,25 @@ export const subscribeToActiveVisitors = (
   }
 
   try {
-    // Subscribe to all visitors and filter client-side
-    const visitorsRef = collection(db, "visitors");
-    
-    const unsubscribe = onSnapshot(
-      visitorsRef,
-      (snapshot) => {
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-        const activeVisitors = snapshot.docs.filter((doc) => {
-          const data = doc.data();
-          const lastSeenAt = data.lastSeenAt instanceof Date
-            ? data.lastSeenAt
-            : (data.lastSeenAt && typeof data.lastSeenAt.toDate === "function"
-              ? data.lastSeenAt.toDate()
-              : new Date(0));
-          return lastSeenAt >= fiveMinutesAgo && data.isActive === true;
-        });
-        callback(activeVisitors.length);
-      },
-      (error) => {
-        console.error("Error subscribing to active visitors:", error);
+    // Use polling instead of real-time listener to save quota
+    // Poll every 30 seconds instead of real-time listener
+    const pollInterval = setInterval(async () => {
+      try {
+        const count = await getActiveVisitorsCount();
+        callback(count);
+      } catch (error) {
+        console.error("Error polling active visitors:", error);
         callback(0);
       }
-    );
+    }, 30000); // Poll every 30 seconds
 
-    return unsubscribe;
+    // Initial call
+    getActiveVisitorsCount().then(callback).catch(() => callback(0));
+
+    // Return cleanup function
+    return () => {
+      clearInterval(pollInterval);
+    };
   } catch (error) {
     console.error("Error subscribing to active visitors:", error);
     return () => {};
