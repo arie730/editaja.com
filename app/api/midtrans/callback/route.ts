@@ -114,8 +114,31 @@ export async function POST(request: NextRequest) {
     console.log(`Payment Type: ${paymentType}`);
     console.log(`Transaction Time: ${notification.transaction_time || "N/A"}`);
 
-    // Get transaction from Firestore
-    const transaction = await getTopupTransactionByOrderIdServer(orderId);
+    // Get transaction from Firestore with error handling for quota issues
+    let transaction: any = null;
+    try {
+      transaction = await getTopupTransactionByOrderIdServer(orderId);
+    } catch (error: any) {
+      // Handle quota exceeded errors specially
+      if (error.message?.includes("quota exceeded") || error.code === 8) {
+        console.error("❌ Firestore quota exceeded while getting transaction:", orderId);
+        console.error("   This usually means Firestore free tier quota is exhausted.");
+        console.error("   Please upgrade Firestore plan or wait for quota reset.");
+        
+        // Return 200 but with error message so Midtrans doesn't retry immediately
+        // Midtrans will retry later automatically
+        return NextResponse.json({ 
+          ok: false, 
+          error: "Firestore quota exceeded. Transaction will be processed when quota is available.",
+          orderId,
+          retryAfter: 3600 // Suggest retry after 1 hour
+        }, { status: 200 });
+      }
+      
+      // Re-throw other errors
+      throw error;
+    }
+    
     if (!transaction) {
       console.error("❌ Transaction not found in Firestore:", orderId);
       console.error("This might mean:");

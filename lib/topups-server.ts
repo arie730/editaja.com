@@ -114,7 +114,40 @@ export async function updateTopupTransactionServer(
   }
 }
 
-// Get topup transaction by order ID (server-side)
+// Helper function to retry Firestore operations with exponential backoff
+async function retryFirestoreOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: any;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check if it's a quota exceeded error
+      if (error.code === 8 || error.message?.includes("Quota exceeded") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+        const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+        console.warn(`⚠️ Firestore quota exceeded. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
+        
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      
+      // If not a quota error or max retries reached, throw immediately
+      throw error;
+    }
+  }
+  
+  throw lastError;
+}
+
+// Get topup transaction by order ID (server-side) with retry logic
 export async function getTopupTransactionByOrderIdServer(orderId: string): Promise<any | null> {
   try {
     const db = getAdminFirestore();
@@ -124,28 +157,43 @@ export async function getTopupTransactionByOrderIdServer(orderId: string): Promi
         "Please setup Firebase Admin SDK by setting FIREBASE_SERVICE_ACCOUNT environment variable."
       );
     }
-    const snapshot = await db
-      .collection("topupTransactions")
-      .where("orderId", "==", orderId)
-      .limit(1)
-      .get();
+    
+    // Use retry logic for quota exceeded errors
+    const result = await retryFirestoreOperation(async () => {
+      const snapshot = await db
+        .collection("topupTransactions")
+        .where("orderId", "==", orderId)
+        .limit(1)
+        .get();
 
-    if (snapshot.empty) {
-      return null;
-    }
+      if (snapshot.empty) {
+        return null;
+      }
 
-    const doc = snapshot.docs[0];
-    return {
-      id: doc.id,
-      ...doc.data(),
-    };
+      const doc = snapshot.docs[0];
+      return {
+        id: doc.id,
+        ...doc.data(),
+      };
+    });
+    
+    return result;
   } catch (error: any) {
-    console.error("Error getting topup transaction (server):", error);
+    console.error("❌ Error getting topup transaction (server):", error.message);
+    console.error("   Error code:", error.code);
+    console.error("   Error details:", error.details);
+    
+    // If it's still a quota error after retries, return null to prevent infinite retries
+    if (error.code === 8 || error.message?.includes("Quota exceeded") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+      console.error("⚠️ Firestore quota exceeded even after retries. Please check your Firestore quota.");
+      throw new Error("Firestore quota exceeded. Please try again later or contact administrator.");
+    }
+    
     throw error;
   }
 }
 
-// Complete topup transaction (server-side)
+// Complete topup transaction (server-side) with retry logic
 export async function completeTopupTransactionServer(
   transactionId: string,
   orderId: string
@@ -160,8 +208,11 @@ export async function completeTopupTransactionServer(
       throw new Error(errorMsg);
     }
     
+    // Use retry logic for Firestore operations
     const transactionRef = db.collection("topupTransactions").doc(transactionId);
-    const transactionDoc = await transactionRef.get();
+    const transactionDoc = await retryFirestoreOperation(async () => {
+      return await transactionRef.get();
+    });
 
     if (!transactionDoc.exists) {
       console.error(`Transaction document not found: ${transactionId}`);
@@ -178,9 +229,11 @@ export async function completeTopupTransactionServer(
     // IMPORTANT: Only skip if status is "settlement" AND we can verify diamonds were added
     // This prevents skipping legitimate completions for subsequent transactions
     if (currentStatus === "settlement") {
-      // Double-check if diamonds were actually added
+      // Double-check if diamonds were actually added with retry logic
       const userTokensRef = db.collection("userTokens").doc(transactionData?.userId);
-      const userTokensDoc = await userTokensRef.get();
+      const userTokensDoc = await retryFirestoreOperation(async () => {
+        return await userTokensRef.get();
+      });
       const userTokens = userTokensDoc.data()?.tokens || 0;
       const expectedTotal = (transactionData?.diamonds || 0) + (transactionData?.bonus || 0);
       const completedAt = transactionData?.completedAt;
@@ -214,9 +267,12 @@ export async function completeTopupTransactionServer(
       throw new Error(`Invalid diamond amount: ${totalDiamonds}`);
     }
     
-    // Use Admin SDK to update user tokens (bypasses rules)
+    // Use Admin SDK to update user tokens (bypasses rules) with retry logic
     const userTokensRef = db.collection("userTokens").doc(transactionData.userId);
-    const userTokensDoc = await userTokensRef.get();
+    
+    const userTokensDoc = await retryFirestoreOperation(async () => {
+      return await userTokensRef.get();
+    });
     
     if (userTokensDoc.exists) {
       const currentTokens = userTokensDoc.data()?.tokens || 0;
@@ -226,15 +282,19 @@ export async function completeTopupTransactionServer(
       console.log(`   Adding: ${totalDiamonds}`);
       console.log(`   New total: ${newTokens}`);
       
-      // Use batch write for atomicity (optional, but safer)
-      await userTokensRef.update({
-        tokens: newTokens,
-        updatedAt: new Date(),
+      // Update tokens with retry logic
+      await retryFirestoreOperation(async () => {
+        await userTokensRef.update({
+          tokens: newTokens,
+          updatedAt: new Date(),
+        });
       });
       console.log(`✅ User tokens updated successfully: ${currentTokens} → ${newTokens}`);
       
-      // Verify update
-      const verifyDoc = await userTokensRef.get();
+      // Verify update with retry logic
+      const verifyDoc = await retryFirestoreOperation(async () => {
+        return await userTokensRef.get();
+      });
       const verifyTokens = verifyDoc.data()?.tokens || 0;
       if (verifyTokens !== newTokens) {
         console.error(`⚠️ WARNING: Token update verification failed! Expected ${newTokens}, got ${verifyTokens}`);
@@ -243,18 +303,22 @@ export async function completeTopupTransactionServer(
         console.log(`✅ Token update verified: ${verifyTokens} tokens`);
       }
     } else {
-      // Create token document if it doesn't exist
+      // Create token document if it doesn't exist with retry logic
       console.log(`Creating new user token document for ${transactionData.userId}`);
-      await userTokensRef.set({
-        userId: transactionData.userId,
-        tokens: totalDiamonds,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      await retryFirestoreOperation(async () => {
+        await userTokensRef.set({
+          userId: transactionData.userId,
+          tokens: totalDiamonds,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
       });
       console.log(`✅ User token document created with ${totalDiamonds} tokens`);
       
-      // Verify creation
-      const verifyDoc = await userTokensRef.get();
+      // Verify creation with retry logic
+      const verifyDoc = await retryFirestoreOperation(async () => {
+        return await userTokensRef.get();
+      });
       const verifyTokens = verifyDoc.data()?.tokens || 0;
       if (verifyTokens !== totalDiamonds) {
         console.error(`⚠️ WARNING: Token creation verification failed! Expected ${totalDiamonds}, got ${verifyTokens}`);
@@ -264,12 +328,14 @@ export async function completeTopupTransactionServer(
       }
     }
 
-    // Update transaction status AFTER diamonds are added
+    // Update transaction status AFTER diamonds are added with retry logic
     console.log(`Updating transaction status to settlement`);
-    await transactionRef.update({
-      status: "settlement",
-      completedAt: new Date(),
-      updatedAt: new Date(),
+    await retryFirestoreOperation(async () => {
+      await transactionRef.update({
+        status: "settlement",
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      });
     });
     console.log(`✅ Transaction status updated to settlement`);
 
