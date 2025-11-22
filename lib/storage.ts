@@ -135,8 +135,17 @@ export const uploadImageToLocal = async (
   type: "original" | "generated"
 ): Promise<string> => {
   try {
+    // Compress image in browser before upload to avoid 413 errors on Vercel
+    let fileToUpload = file;
+    
+    // Only compress if file is larger than 3MB (to stay under Vercel's 4.5MB limit)
+    if (file.size > 3 * 1024 * 1024) {
+      const { compressImageInBrowser } = await import("@/lib/image-compression");
+      fileToUpload = await compressImageInBrowser(file, 3, 0.8);
+    }
+
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
     formData.append("userId", userId);
     formData.append("type", type);
 

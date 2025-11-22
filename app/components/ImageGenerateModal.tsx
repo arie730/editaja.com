@@ -283,8 +283,16 @@ export default function ImageGenerateModal({
       setProgressStep("processing");
       setProgressMessage("Preparing your image for generation...");
       
+      // Compress image in browser before upload to avoid 413 errors on Vercel
+      let fileToGenerate = selectedFile;
+      if (selectedFile.size > 3 * 1024 * 1024) {
+        setProgressMessage("Compressing image for upload...");
+        const { compressImageInBrowser } = await import("@/lib/image-compression");
+        fileToGenerate = await compressImageInBrowser(selectedFile, 3, 0.8);
+      }
+      
       const formData = new FormData();
-      formData.append("image", selectedFile);
+      formData.append("image", fileToGenerate);
       formData.append("styleId", style.id);
       // Use custom prompt if user edited it, otherwise use style prompt
       const promptToUse = customPrompt.trim() || style.prompt;
