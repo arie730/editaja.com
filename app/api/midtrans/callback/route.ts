@@ -24,6 +24,9 @@ const verifySignature = (orderId: string, statusCode: string, grossAmount: strin
 };
 
 export async function POST(request: NextRequest) {
+  let notification: any = null;
+  let orderId: string = "unknown";
+  
   try {
     console.log("=== Midtrans Callback Received ===");
     
@@ -38,8 +41,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse notification body
-    const notification = await request.json();
+    notification = await request.json();
+    orderId = notification.order_id || "unknown";
     console.log("Notification data:", JSON.stringify(notification, null, 2));
+    console.log(`Order ID from notification: ${orderId}`);
 
     // Verify signature (optional - only if provided)
     const signatureKey = request.headers.get("x-midtrans-signature");
@@ -123,32 +128,58 @@ export async function POST(request: NextRequest) {
 
     // If status is settlement and not already completed, complete the transaction
     if (newStatus === "settlement" && transaction.status !== "settlement") {
-      console.log(`Completing transaction ${transaction.id} - adding diamonds to user`);
+      console.log(`=== COMPLETING TRANSACTION ===`);
+      console.log(`Transaction ID: ${transaction.id}`);
+      console.log(`Order ID: ${orderId}`);
+      console.log(`User ID: ${transaction.userId}`);
+      console.log(`Diamonds: ${transaction.diamonds}`);
+      console.log(`Bonus: ${transaction.bonus || 0}`);
+      console.log(`Total: ${transaction.diamonds + (transaction.bonus || 0)}`);
+      
       try {
         await completeTopupTransactionServer(transaction.id, orderId);
-        console.log(`Transaction ${orderId} completed successfully - diamonds added`);
+        console.log(`✅ Transaction ${orderId} completed successfully - diamonds added`);
       } catch (error: any) {
-        console.error("Error completing transaction:", error);
-        console.error("Error details:", error.message, error.stack);
-        // Don't fail the callback, just log the error
-        // Return success so Midtrans doesn't retry
+        console.error("❌ ERROR COMPLETING TRANSACTION:");
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+        console.error("Error code:", error.code);
+        
+        // Re-throw error to prevent silent failure
+        // But return 200 to Midtrans so they don't retry immediately
+        // The error will be logged in Vercel logs
+        throw new Error(`Failed to complete transaction: ${error.message}`);
       }
     } else if (transaction.status === "settlement") {
-      console.log(`Transaction ${orderId} already completed - skipping`);
+      console.log(`Transaction ${orderId} already completed (status: ${transaction.status}) - skipping`);
+    } else {
+      console.log(`Transaction ${orderId} not ready for completion. Status: ${transaction.status} -> ${newStatus}`);
     }
 
     console.log("=== Midtrans Callback Processed Successfully ===");
-    return NextResponse.json({ ok: true, message: "Notification processed" });
+    return NextResponse.json({ 
+      ok: true, 
+      message: "Notification processed",
+      orderId,
+      transactionStatus: newStatus
+    });
   } catch (error: any) {
-    console.error("=== Error processing Midtrans callback ===");
+    console.error("=== ❌ ERROR PROCESSING MIDTRANS CALLBACK ===");
     console.error("Error:", error);
     console.error("Error message:", error.message);
     console.error("Error stack:", error.stack);
+    console.error("Error name:", error.name);
+    console.error("Error code:", error.code);
     
-    // Return 200 to prevent Midtrans from retrying
-    // But log the error for debugging
+    // Return 200 to prevent Midtrans from retrying infinitely
+    // But log the error for debugging in Vercel logs
+    // You should check Vercel logs to see what went wrong
     return NextResponse.json(
-      { ok: false, error: error.message || "Internal server error" },
+      { 
+        ok: false, 
+        error: error.message || "Internal server error",
+        orderId: orderId || notification?.order_id || "unknown"
+      },
       { status: 200 }
     );
   }
