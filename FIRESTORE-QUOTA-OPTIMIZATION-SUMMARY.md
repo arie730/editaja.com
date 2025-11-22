@@ -120,3 +120,4 @@ Jika masih ada masalah quota:
 1. Upgrade ke Blaze Plan (recommended untuk production)
 2. Atau optimasi lebih lanjut fungsi-fungsi yang masih get ALL documents
 
+

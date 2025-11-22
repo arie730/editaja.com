@@ -81,3 +81,4 @@
 - Cache stats dengan TTL
 - Kurangi query yang tidak perlu
 
+

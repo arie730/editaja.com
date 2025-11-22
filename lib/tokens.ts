@@ -7,6 +7,7 @@ export interface UserTokenData {
   tokens: number;
   createdAt?: any;
   updatedAt?: any;
+  lastResetDate?: any; // Timestamp of last daily token reset
 }
 
 // Initial tokens for new users
@@ -17,6 +18,75 @@ export const TOKEN_COST_PER_GENERATE = 10;
 
 // Maximum generations for anonymous users (default, will be overridden by settings)
 export const MAX_ANONYMOUS_GENERATIONS = 1;
+
+// Helper function to check if two dates are on different days
+const isDifferentDay = (date1: Date, date2: Date): boolean => {
+  return (
+    date1.getFullYear() !== date2.getFullYear() ||
+    date1.getMonth() !== date2.getMonth() ||
+    date1.getDate() !== date2.getDate()
+  );
+};
+
+// Helper function to check and reset tokens if date has changed
+const checkAndResetDailyTokens = async (userId: string, tokenData: any): Promise<boolean> => {
+  if (!db) {
+    throw new Error("Firestore not initialized");
+  }
+
+  try {
+    const now = new Date();
+    let lastResetDate: Date | null = null;
+    
+    // Handle different formats of lastResetDate
+    if (tokenData.lastResetDate) {
+      if (tokenData.lastResetDate.toDate && typeof tokenData.lastResetDate.toDate === 'function') {
+        // Firestore Timestamp
+        lastResetDate = tokenData.lastResetDate.toDate();
+      } else if (tokenData.lastResetDate instanceof Date) {
+        // Already a Date object
+        lastResetDate = tokenData.lastResetDate;
+      } else if (typeof tokenData.lastResetDate === 'number') {
+        // Timestamp as number
+        lastResetDate = new Date(tokenData.lastResetDate);
+      } else if (tokenData.lastResetDate.seconds) {
+        // Firestore Timestamp with seconds property
+        lastResetDate = new Date(tokenData.lastResetDate.seconds * 1000);
+      }
+    }
+    
+    // If lastResetDate doesn't exist, set it to now and don't reset (first time)
+    // This handles existing users who don't have lastResetDate field yet
+    if (!lastResetDate) {
+      const tokenRef = doc(db, "userTokens", userId);
+      await updateDoc(tokenRef, {
+        lastResetDate: serverTimestamp(),
+      });
+      return false; // No reset needed, just set the date
+    }
+
+    // Check if the date has changed (different day)
+    if (isDifferentDay(now, lastResetDate)) {
+      const initialTokens = await getInitialTokens();
+      const tokenRef = doc(db, "userTokens", userId);
+      
+      await updateDoc(tokenRef, {
+        tokens: initialTokens,
+        lastResetDate: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      
+      console.log(`Daily token reset: User ${userId} tokens reset to ${initialTokens} (date changed)`);
+      return true; // Reset was performed
+    }
+
+    return false; // No reset needed (same day)
+  } catch (error: any) {
+    console.error("Error checking/resetting daily tokens:", error);
+    // Don't throw - allow function to continue even if reset check fails
+    return false;
+  }
+};
 
 // Get user tokens
 export const getUserTokens = async (userId: string): Promise<number> => {
@@ -30,6 +100,17 @@ export const getUserTokens = async (userId: string): Promise<number> => {
 
     if (tokenSnap.exists()) {
       const data = tokenSnap.data();
+      
+      // Check and reset if needed (daily reset)
+      await checkAndResetDailyTokens(userId, data);
+      
+      // Re-fetch to get updated token count after potential reset
+      const updatedSnap = await getDoc(tokenRef);
+      if (updatedSnap.exists()) {
+        const updatedData = updatedSnap.data();
+        return updatedData.tokens || 0;
+      }
+      
       return data.tokens || 0;
     }
 
@@ -61,6 +142,7 @@ export const initializeUserTokens = async (userId: string): Promise<void> => {
         tokens: initialTokens,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        lastResetDate: serverTimestamp(), // Set initial reset date
       });
       console.log(`Initialized ${initialTokens} tokens for user ${userId}`);
     }
@@ -101,7 +183,14 @@ export const deductUserTokens = async (userId: string, amount: number): Promise<
     if (!tokenData) {
       throw new Error("Token document data is undefined");
     }
-    const currentTokens = tokenData.tokens || 0;
+    
+    // Check and reset tokens if 24 hours have passed (before deducting)
+    await checkAndResetDailyTokens(userId, tokenData);
+    
+    // Re-fetch after potential reset
+    const updatedSnap = await getDoc(tokenRef);
+    const updatedData = updatedSnap.exists() ? updatedSnap.data() : tokenData;
+    const currentTokens = updatedData?.tokens || 0;
 
     if (currentTokens < amount) {
       return false; // Insufficient tokens
@@ -199,11 +288,20 @@ export const getUserTokenData = async (userId: string): Promise<UserTokenData | 
     }
 
     const data = tokenSnap.data();
+    
+    // Check and reset tokens if 24 hours have passed
+    await checkAndResetDailyTokens(userId, data);
+    
+    // Re-fetch after potential reset
+    const updatedSnap = await getDoc(tokenRef);
+    const updatedData = updatedSnap.exists() ? updatedSnap.data() : data;
+    
     return {
       userId: tokenSnap.id,
-      tokens: data.tokens || 0,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
+      tokens: updatedData?.tokens || 0,
+      createdAt: updatedData?.createdAt || data.createdAt,
+      updatedAt: updatedData?.updatedAt || data.updatedAt,
+      lastResetDate: updatedData?.lastResetDate || data.lastResetDate,
     };
   } catch (error: any) {
     console.error("Error getting user token data:", error);
