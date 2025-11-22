@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       console.log("No signature provided - continuing without verification");
     }
 
-    const orderId = notification.order_id;
+    // orderId already set above
     const transactionStatus = notification.transaction_status;
     const fraudStatus = notification.fraud_status;
 
