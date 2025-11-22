@@ -104,7 +104,8 @@ export async function POST(request: NextRequest) {
     // Compress image BEFORE converting to base64 to reduce payload size
     console.log(`Original image size: ${(imageFile.size / 1024 / 1024).toFixed(2)}MB`);
     const arrayBuffer = await imageFile.arrayBuffer();
-    let buffer = Buffer.from(arrayBuffer);
+    // Create Buffer with explicit type to avoid TypeScript error
+    let buffer: Buffer = Buffer.from(new Uint8Array(arrayBuffer));
     
     // Compress image if it's large (base64 adds ~33% size, so we compress to ~3MB to stay under 4.5MB base64)
     // For Vercel Hobby plan: limit is 4.5MB, so compressed image should be max ~3MB (becomes ~4MB in base64)
