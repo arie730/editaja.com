@@ -48,7 +48,9 @@ export default function BetaTesterPage() {
 
         // Check current beta tester count if limit is set
         if (maxLimit !== null && maxLimit > 0 && db) {
-          const betaTestersCollection = collection(db, "betaTesters");
+          // Store db in local variable for TypeScript type narrowing
+          const firestoreDbLocal = db;
+          const betaTestersCollection = collection(firestoreDbLocal, "betaTesters");
           const countSnapshot = await getCountFromServer(betaTestersCollection);
           const currentCount = countSnapshot.data().count;
           setCurrentBetaTesterCount(currentCount);
@@ -62,8 +64,10 @@ export default function BetaTesterPage() {
         if (user && db) {
           const currentUser = auth?.currentUser;
           if (currentUser) {
+            // Store db in local variable for TypeScript type narrowing
+            const firestoreDbLocal = db;
             const userId = currentUser.uid;
-            const betaTesterRef = doc(db, "betaTesters", userId);
+            const betaTesterRef = doc(firestoreDbLocal, "betaTesters", userId);
             const betaTesterDoc = await getDoc(betaTesterRef);
             setIsRegistered(betaTesterDoc.exists());
           }
@@ -83,9 +87,13 @@ export default function BetaTesterPage() {
     if (user && db && !isRegistered) {
       const recheckLimit = async () => {
         try {
+          // Store db in local variable for TypeScript type narrowing
+          const firestoreDb = db;
+          if (!firestoreDb) return;
+          
           const maxLimit = await getMaxBetaTesters();
-          if (maxLimit !== null && maxLimit > 0 && db) {
-            const betaTestersCollection = collection(db, "betaTesters");
+          if (maxLimit !== null && maxLimit > 0) {
+            const betaTestersCollection = collection(firestoreDb, "betaTesters");
             const countSnapshot = await getCountFromServer(betaTestersCollection);
             const currentCount = countSnapshot.data().count;
             setCurrentBetaTesterCount(currentCount);
@@ -115,6 +123,9 @@ export default function BetaTesterPage() {
       return;
     }
 
+    // Store db in local variable for TypeScript type narrowing
+    const firestoreDb = db;
+
     try {
       setLoading(true);
       setError("");
@@ -133,7 +144,7 @@ export default function BetaTesterPage() {
       }
 
       // Check if user is already a beta tester
-      const betaTesterRef = doc(db, "betaTesters", userId);
+      const betaTesterRef = doc(firestoreDb, "betaTesters", userId);
       const betaTesterDoc = await getDoc(betaTesterRef);
 
       if (betaTesterDoc.exists()) {
@@ -145,9 +156,9 @@ export default function BetaTesterPage() {
 
       // Check max beta testers limit BEFORE registering
       const maxBetaTesters = await getMaxBetaTesters();
-      if (maxBetaTesters !== null && maxBetaTesters > 0 && db) {
+      if (maxBetaTesters !== null && maxBetaTesters > 0) {
         // Count current beta testers (including this user if they're about to register)
-        const betaTestersCollection = collection(db, "betaTesters");
+        const betaTestersCollection = collection(firestoreDb, "betaTesters");
         const countSnapshot = await getCountFromServer(betaTestersCollection);
         const currentCount = countSnapshot.data().count;
 
@@ -173,7 +184,7 @@ export default function BetaTesterPage() {
       });
 
       // Add free tokens to user account
-      const userTokensRef = doc(db, "userTokens", userId);
+      const userTokensRef = doc(firestoreDb, "userTokens", userId);
       const userTokensDoc = await getDoc(userTokensRef);
 
       if (userTokensDoc.exists()) {
