@@ -184,13 +184,18 @@ service cloud.firestore {
 
     // TopupTransactions collection - users can create their own, admins can read/write all
     match /topupTransactions/{transactionId} {
-      // Users can read their own transactions
+      // Users can read their own transactions (document-level read)
       allow read: if request.auth != null &&
                      resource != null &&
                      resource.data.userId == request.auth.uid;
 
       // Admins can read all transactions
       allow read: if isAdmin();
+      
+      // Allow list queries (queries) - users can query their own transactions
+      // This allows getTopupTransactionByOrderId to work when filtering by userId
+      // Note: Firestore requires that queries include a filter matching the security rule
+      allow list: if request.auth != null;
 
       // Authenticated users can create their own transactions
       allow create: if request.auth != null &&

@@ -83,15 +83,30 @@ export const updateTopupTransaction = async (
   }
 };
 
-// Get topup transaction by order ID
-export const getTopupTransactionByOrderId = async (orderId: string): Promise<TopupTransaction | null> => {
+// Get topup transaction by order ID (for authenticated user)
+export const getTopupTransactionByOrderId = async (orderId: string, userId?: string): Promise<TopupTransaction | null> => {
   if (!db) {
     throw new Error("Firestore not initialized");
   }
 
   try {
     const transactionsRef = collection(db, "topupTransactions");
-    const q = query(transactionsRef, where("orderId", "==", orderId), limit(1));
+    
+    // If userId is provided, filter by both orderId and userId to satisfy Firestore rules
+    // This ensures the user can only read their own transactions
+    let q;
+    if (userId) {
+      q = query(
+        transactionsRef, 
+        where("orderId", "==", orderId),
+        where("userId", "==", userId),
+        limit(1)
+      );
+    } else {
+      // Fallback: try query by orderId only (may fail if rules don't allow)
+      q = query(transactionsRef, where("orderId", "==", orderId), limit(1));
+    }
+    
     const querySnapshot = await getDocs(q);
 
     if (querySnapshot.empty) {
@@ -100,12 +115,23 @@ export const getTopupTransactionByOrderId = async (orderId: string): Promise<Top
 
     const doc = querySnapshot.docs[0];
     const data = doc.data();
+    
+    // Verify userId matches if userId was provided
+    if (userId && data.userId !== userId) {
+      console.warn("Transaction userId mismatch. Access denied.");
+      return null;
+    }
+    
     return {
       id: doc.id,
       ...data,
     } as TopupTransaction;
   } catch (error: any) {
     console.error("Error getting topup transaction:", error);
+    // If it's a permissions error, provide helpful message
+    if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+      throw new Error("You don't have permission to access this transaction. Make sure you're logged in and this is your transaction.");
+    }
     throw error;
   }
 };

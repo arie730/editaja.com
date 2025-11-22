@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { getTopupTransactionByOrderId } from "@/lib/topups";
 import { getUserTokens } from "@/lib/tokens";
@@ -29,17 +29,6 @@ export default function TestMidtransPage() {
     { id: "test-3", name: "Test Package 3", diamonds: 1000, bonus: 100, price: 100000 },
   ];
 
-  const addResult = (message: string, type: "success" | "error" | "info" = "info") => {
-    setResults((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        message,
-        type,
-        timestamp: new Date().toLocaleTimeString(),
-      },
-    ]);
-  };
 
   // Load Midtrans config and script
   useEffect(() => {
@@ -99,6 +88,26 @@ export default function TestMidtransPage() {
     fetchTokens();
   }, [user]);
 
+  // Use ref for counter to ensure unique IDs (avoid duplicate keys)
+  const resultIdCounterRef = React.useRef(0);
+
+  const addResult = (message: string, type: "success" | "error" | "info" = "info") => {
+    setResults((prev) => {
+      resultIdCounterRef.current += 1;
+      // Combine timestamp, counter, and random string to ensure uniqueness
+      const uniqueId = `${Date.now()}-${resultIdCounterRef.current}-${Math.random().toString(36).substr(2, 9)}`;
+      return [
+        ...prev,
+        {
+          id: uniqueId,
+          message,
+          type,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ];
+    });
+  };
+
   const testCreatePayment = async (pkg: typeof testPackages[0]) => {
     if (!user) {
       addResult("❌ Please login first", "error");
@@ -130,7 +139,22 @@ export default function TestMidtransPage() {
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Failed to create payment");
+        const errorMessage = data.error || "Failed to create payment";
+        
+        // Enhanced error message for Firebase Admin SDK error
+        if (errorMessage.includes("Firebase Admin SDK not initialized")) {
+          addResult(`❌ ${errorMessage}`, "error");
+          addResult(`🔧 SETUP REQUIRED:`, "error");
+          addResult(`1. Download service account key from Firebase Console`, "error");
+          addResult(`2. Convert JSON to single-line string`, "error");
+          addResult(`3. Add FIREBASE_SERVICE_ACCOUNT in Vercel Environment Variables`, "error");
+          addResult(`4. Redeploy application`, "error");
+          addResult(`📖 See: VERCEL-FIREBASE-ADMIN-SETUP.md for detailed instructions`, "error");
+          throw new Error(errorMessage);
+        }
+        
+        addResult(`❌ Error: ${errorMessage}`, "error");
+        throw new Error(errorMessage);
       }
 
       addResult(`✅ Payment created successfully!`, "success");
@@ -205,11 +229,17 @@ export default function TestMidtransPage() {
       return;
     }
 
+    if (!user) {
+      addResult("❌ Please login first to check transaction status", "error");
+      return;
+    }
+
     try {
       setTesting(true);
       addResult(`🔄 Checking transaction status for: ${orderIdToCheck}...`, "info");
 
-      const transaction = await getTopupTransactionByOrderId(orderIdToCheck);
+      // Pass userId to ensure we can read the transaction
+      const transaction = await getTopupTransactionByOrderId(orderIdToCheck, user.uid);
       
       if (!transaction) {
         addResult(`❌ Transaction not found in Firestore`, "error");
@@ -456,10 +486,20 @@ export default function TestMidtransPage() {
               <p className="text-yellow-400 text-sm font-semibold mb-1">⚠️ Important Notes:</p>
               <ul className="text-yellow-400/80 text-xs space-y-1 ml-4 list-disc">
                 <li>Make sure Firebase Admin SDK is configured in Vercel</li>
-                <li>Set FIREBASE_SERVICE_ACCOUNT environment variable</li>
+                <li>Set FIREBASE_SERVICE_ACCOUNT environment variable (see VERCEL-FIREBASE-ADMIN-SETUP.md)</li>
                 <li>Callback URL must be accessible from Midtrans servers</li>
                 <li>Check Vercel logs for detailed error messages</li>
+                <li>After adding environment variable, redeploy application!</li>
               </ul>
+            </div>
+            <div className="mt-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30">
+              <p className="text-blue-400 text-sm font-semibold mb-1">📖 Setup Firebase Admin SDK:</p>
+              <p className="text-blue-400/80 text-xs">
+                If you see "Firebase Admin SDK not initialized" error, follow the setup guide in <code className="bg-[#1A1A1A] px-1 py-0.5 rounded">VERCEL-FIREBASE-ADMIN-SETUP.md</code>
+              </p>
+              <p className="text-blue-400/80 text-xs mt-1">
+                Quick steps: Download service account key → Convert to single-line JSON → Add to Vercel Environment Variables → Redeploy
+              </p>
             </div>
           </div>
         </div>
