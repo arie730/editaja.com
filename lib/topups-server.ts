@@ -174,23 +174,32 @@ export async function completeTopupTransactionServer(
     // Check if already completed - use a transaction to prevent race conditions
     // Get fresh transaction data to avoid race conditions
     const currentStatus = transactionData?.status;
+    
+    // IMPORTANT: Only skip if status is "settlement" AND we can verify diamonds were added
+    // This prevents skipping legitimate completions for subsequent transactions
     if (currentStatus === "settlement") {
       // Double-check if diamonds were actually added
       const userTokensRef = db.collection("userTokens").doc(transactionData?.userId);
       const userTokensDoc = await userTokensRef.get();
       const userTokens = userTokensDoc.data()?.tokens || 0;
       const expectedTotal = (transactionData?.diamonds || 0) + (transactionData?.bonus || 0);
+      const completedAt = transactionData?.completedAt;
       
-      console.log(`Transaction ${orderId} status is already "settlement"`);
-      console.log(`Expected diamonds: ${expectedTotal}, User current tokens: ${userTokens}`);
+      console.log(`⚠️ Transaction ${orderId} status is already "settlement"`);
+      console.log(`   Expected diamonds from this transaction: ${expectedTotal}`);
+      console.log(`   User current tokens: ${userTokens}`);
+      console.log(`   Completed at: ${completedAt || "N/A"}`);
       
-      // If transaction is settlement but diamonds might not be added (race condition or previous failure)
-      // We'll still try to add them (idempotent operation)
-      // But first check if they're already there
-      // For now, skip if status is settlement to avoid duplicate adds
-      // TODO: Add better idempotency check using transaction logs
-      console.log(`Skipping - transaction already marked as settlement`);
-      return;
+      // Only skip if transaction has completedAt timestamp (indicating it was truly completed)
+      // This ensures we don't skip transactions that were marked settlement but not completed
+      if (completedAt) {
+        console.log(`✅ Transaction already completed with completedAt timestamp - skipping to avoid duplicate`);
+        return;
+      } else {
+        console.log(`⚠️ Transaction marked as settlement but no completedAt timestamp found!`);
+        console.log(`   This might indicate an incomplete completion. Proceeding with completion...`);
+        // Continue with completion to ensure diamonds are added
+      }
     }
 
     // Add diamonds to user account using Admin SDK
