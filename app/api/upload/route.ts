@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
 
       // Convert file to buffer
       const bytes = await file.arrayBuffer();
-      let buffer = Buffer.from(bytes);
+      // Create Buffer with explicit type to avoid TypeScript error
+      let buffer: Buffer = Buffer.from(new Uint8Array(bytes));
 
       // Compress image if it's larger than 10MB to ensure it doesn't exceed 5MB
       buffer = await compressImageIfNeeded(buffer, file.type || `image/${fileExtension}`);
@@ -72,7 +73,8 @@ export async function POST(request: NextRequest) {
       
       // Convert file to buffer
       const bytes = await file.arrayBuffer();
-      let buffer = Buffer.from(bytes);
+      // Create Buffer with explicit type to avoid TypeScript error
+      let buffer: Buffer = Buffer.from(new Uint8Array(bytes));
       const fileExtension = file.name.split(".").pop() || "jpg";
       
       // Compress image if it's larger than 10MB to ensure it doesn't exceed 5MB
