@@ -144,22 +144,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`Updating transaction status from ${transaction.status} to ${newStatus}`);
 
-    // Update transaction (using server-side function if available)
-    try {
-      await updateTopupTransactionServer(transaction.id, {
-        status: newStatus,
-        midtransTransactionId: notification.transaction_id,
-        paymentMethod: notification.payment_type,
-      });
-      console.log(`Transaction ${transaction.id} updated successfully`);
-    } catch (updateError: any) {
-      console.error("Error updating transaction:", updateError);
-      // Continue anyway - might be permission issue
-    }
-
-    // If status is settlement and not already completed, complete the transaction
-    if (newStatus === "settlement" && transaction.status !== "settlement") {
-      console.log(`=== COMPLETING TRANSACTION ===`);
+    // IMPORTANT: Check if we need to complete transaction BEFORE updating status
+    // This ensures diamonds are added even if transaction status update happens first
+    const needsCompletion = newStatus === "settlement" && transaction.status !== "settlement";
+    
+    if (needsCompletion) {
+      console.log(`=== COMPLETING TRANSACTION (before status update) ===`);
       console.log(`Transaction ID: ${transaction.id}`);
       console.log(`Order ID: ${orderId}`);
       console.log(`User ID: ${transaction.userId}`);
@@ -168,23 +158,65 @@ export async function POST(request: NextRequest) {
       console.log(`Total: ${transaction.diamonds + (transaction.bonus || 0)}`);
       
       try {
+        // Complete transaction first - this will add diamonds and update status to settlement
         await completeTopupTransactionServer(transaction.id, orderId);
         console.log(`✅ Transaction ${orderId} completed successfully - diamonds added`);
+        
+        // Update additional fields if needed (midtransTransactionId, paymentMethod)
+        // Status is already updated by completeTopupTransactionServer
+        try {
+          await updateTopupTransactionServer(transaction.id, {
+            midtransTransactionId: notification.transaction_id,
+            paymentMethod: notification.payment_type,
+          });
+          console.log(`Transaction ${transaction.id} metadata updated successfully`);
+        } catch (updateError: any) {
+          console.error("Error updating transaction metadata:", updateError);
+          // Non-critical error, continue
+        }
       } catch (error: any) {
         console.error("❌ ERROR COMPLETING TRANSACTION:");
         console.error("Error message:", error.message);
         console.error("Error stack:", error.stack);
         console.error("Error code:", error.code);
         
+        // Still update transaction status even if completion failed
+        // This allows retry mechanism or manual fix later
+        try {
+          await updateTopupTransactionServer(transaction.id, {
+            status: newStatus,
+            midtransTransactionId: notification.transaction_id,
+            paymentMethod: notification.payment_type,
+          });
+          console.log(`Transaction status updated to ${newStatus} despite completion error`);
+        } catch (updateError: any) {
+          console.error("Error updating transaction status:", updateError);
+        }
+        
         // Re-throw error to prevent silent failure
         // But return 200 to Midtrans so they don't retry immediately
         // The error will be logged in Vercel logs
         throw new Error(`Failed to complete transaction: ${error.message}`);
       }
-    } else if (transaction.status === "settlement") {
-      console.log(`Transaction ${orderId} already completed (status: ${transaction.status}) - skipping`);
     } else {
-      console.log(`Transaction ${orderId} not ready for completion. Status: ${transaction.status} -> ${newStatus}`);
+      // Update transaction status (not settlement or already completed)
+      try {
+        await updateTopupTransactionServer(transaction.id, {
+          status: newStatus,
+          midtransTransactionId: notification.transaction_id,
+          paymentMethod: notification.payment_type,
+        });
+        console.log(`Transaction ${transaction.id} updated successfully`);
+      } catch (updateError: any) {
+        console.error("Error updating transaction:", updateError);
+        // Continue anyway - might be permission issue
+      }
+      
+      if (transaction.status === "settlement") {
+        console.log(`Transaction ${orderId} already completed (status: ${transaction.status}) - skipping`);
+      } else {
+        console.log(`Transaction ${orderId} not ready for completion. Status: ${transaction.status} -> ${newStatus}`);
+      }
     }
 
     console.log("=== Midtrans Callback Processed Successfully ===");

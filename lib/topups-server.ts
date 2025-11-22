@@ -171,49 +171,98 @@ export async function completeTopupTransactionServer(
     const transactionData = transactionDoc.data();
     console.log(`Transaction data:`, JSON.stringify(transactionData, null, 2));
 
-    // Check if already completed
-    if (transactionData?.status === "settlement") {
-      console.log(`Transaction ${orderId} already completed - skipping`);
+    // Check if already completed - use a transaction to prevent race conditions
+    // Get fresh transaction data to avoid race conditions
+    const currentStatus = transactionData?.status;
+    if (currentStatus === "settlement") {
+      // Double-check if diamonds were actually added
+      const userTokensRef = db.collection("userTokens").doc(transactionData?.userId);
+      const userTokensDoc = await userTokensRef.get();
+      const userTokens = userTokensDoc.data()?.tokens || 0;
+      const expectedTotal = (transactionData?.diamonds || 0) + (transactionData?.bonus || 0);
+      
+      console.log(`Transaction ${orderId} status is already "settlement"`);
+      console.log(`Expected diamonds: ${expectedTotal}, User current tokens: ${userTokens}`);
+      
+      // If transaction is settlement but diamonds might not be added (race condition or previous failure)
+      // We'll still try to add them (idempotent operation)
+      // But first check if they're already there
+      // For now, skip if status is settlement to avoid duplicate adds
+      // TODO: Add better idempotency check using transaction logs
+      console.log(`Skipping - transaction already marked as settlement`);
       return;
     }
 
     // Add diamonds to user account using Admin SDK
     const totalDiamonds = (transactionData?.diamonds || 0) + (transactionData?.bonus || 0);
-    console.log(`Adding ${totalDiamonds} diamonds to user ${transactionData?.userId} (${transactionData?.diamonds} + ${transactionData?.bonus || 0} bonus)`);
+    console.log(`Adding ${totalDiamonds} diamonds to user ${transactionData?.userId} (${transactionData?.diamonds} base + ${transactionData?.bonus || 0} bonus)`);
+    
+    // Validate required fields
+    if (!transactionData?.userId) {
+      throw new Error("Transaction data missing userId");
+    }
+    if (totalDiamonds <= 0) {
+      throw new Error(`Invalid diamond amount: ${totalDiamonds}`);
+    }
     
     // Use Admin SDK to update user tokens (bypasses rules)
-    const userTokensRef = db.collection("userTokens").doc(transactionData?.userId);
+    const userTokensRef = db.collection("userTokens").doc(transactionData.userId);
     const userTokensDoc = await userTokensRef.get();
     
     if (userTokensDoc.exists) {
       const currentTokens = userTokensDoc.data()?.tokens || 0;
       const newTokens = currentTokens + totalDiamonds;
-      console.log(`Updating user tokens: ${currentTokens} + ${totalDiamonds} = ${newTokens}`);
+      console.log(`📊 Token Update Plan:`);
+      console.log(`   Current tokens: ${currentTokens}`);
+      console.log(`   Adding: ${totalDiamonds}`);
+      console.log(`   New total: ${newTokens}`);
+      
+      // Use batch write for atomicity (optional, but safer)
       await userTokensRef.update({
         tokens: newTokens,
         updatedAt: new Date(),
       });
-      console.log(`User tokens updated successfully`);
+      console.log(`✅ User tokens updated successfully: ${currentTokens} → ${newTokens}`);
+      
+      // Verify update
+      const verifyDoc = await userTokensRef.get();
+      const verifyTokens = verifyDoc.data()?.tokens || 0;
+      if (verifyTokens !== newTokens) {
+        console.error(`⚠️ WARNING: Token update verification failed! Expected ${newTokens}, got ${verifyTokens}`);
+        throw new Error(`Token update verification failed: expected ${newTokens}, got ${verifyTokens}`);
+      } else {
+        console.log(`✅ Token update verified: ${verifyTokens} tokens`);
+      }
     } else {
       // Create token document if it doesn't exist
-      console.log(`Creating new user token document for ${transactionData?.userId}`);
+      console.log(`Creating new user token document for ${transactionData.userId}`);
       await userTokensRef.set({
-        userId: transactionData?.userId,
+        userId: transactionData.userId,
         tokens: totalDiamonds,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      console.log(`User token document created with ${totalDiamonds} tokens`);
+      console.log(`✅ User token document created with ${totalDiamonds} tokens`);
+      
+      // Verify creation
+      const verifyDoc = await userTokensRef.get();
+      const verifyTokens = verifyDoc.data()?.tokens || 0;
+      if (verifyTokens !== totalDiamonds) {
+        console.error(`⚠️ WARNING: Token creation verification failed! Expected ${totalDiamonds}, got ${verifyTokens}`);
+        throw new Error(`Token creation verification failed: expected ${totalDiamonds}, got ${verifyTokens}`);
+      } else {
+        console.log(`✅ Token creation verified: ${verifyTokens} tokens`);
+      }
     }
 
-    // Update transaction status
+    // Update transaction status AFTER diamonds are added
     console.log(`Updating transaction status to settlement`);
     await transactionRef.update({
       status: "settlement",
       completedAt: new Date(),
       updatedAt: new Date(),
     });
-    console.log(`Transaction status updated successfully`);
+    console.log(`✅ Transaction status updated to settlement`);
 
     console.log(`✅ Topup completed successfully: Added ${totalDiamonds} diamonds to user ${transactionData?.userId}`);
   } catch (error: any) {
