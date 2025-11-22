@@ -3,6 +3,7 @@ import { getGeneralSettings } from "@/lib/settings";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
+import { compressImageIfNeeded } from "@/lib/image-utils";
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,7 +47,10 @@ export async function POST(request: NextRequest) {
 
       // Convert file to buffer
       const bytes = await file.arrayBuffer();
-      const buffer = Buffer.from(bytes);
+      let buffer = Buffer.from(bytes);
+
+      // Compress image if it's larger than 10MB to ensure it doesn't exceed 5MB
+      buffer = await compressImageIfNeeded(buffer, file.type || `image/${fileExtension}`);
 
       // Write file to disk
       await writeFile(filePath, buffer);
@@ -68,8 +72,11 @@ export async function POST(request: NextRequest) {
       
       // Convert file to buffer
       const bytes = await file.arrayBuffer();
-      const buffer = Buffer.from(bytes);
+      let buffer = Buffer.from(bytes);
       const fileExtension = file.name.split(".").pop() || "jpg";
+      
+      // Compress image if it's larger than 10MB to ensure it doesn't exceed 5MB
+      buffer = await compressImageIfNeeded(buffer, file.type || `image/${fileExtension}`);
       
       // Create multipart/form-data for upload.php
       const boundary = `----WebKitFormBoundary${Date.now()}`;
