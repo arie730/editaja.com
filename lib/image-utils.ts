@@ -2,6 +2,7 @@ import sharp from "sharp";
 
 const MAX_FILE_SIZE_BEFORE_COMPRESSION = 10 * 1024 * 1024; // 10MB
 const TARGET_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const TARGET_MAX_FILE_SIZE_FOR_BASE64 = 3 * 1024 * 1024; // 3MB (becomes ~4MB in base64)
 
 /**
  * Generate thumbnail URL from image URL
@@ -25,19 +26,23 @@ export const getOriginalImageUrl = (url: string): string => {
  * Compress image if it's larger than 10MB to ensure it doesn't exceed 5MB
  * @param buffer - Image buffer to compress
  * @param mimeType - MIME type of the image (e.g., 'image/jpeg', 'image/png')
+ * @param targetSize - Optional target size in bytes (default: 5MB)
  * @returns Compressed image buffer (or original if no compression needed)
  */
 export async function compressImageIfNeeded(
   buffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  targetSize?: number
 ): Promise<Buffer> {
-  // Check if file size is less than 10MB, no compression needed
-  if (buffer.length < MAX_FILE_SIZE_BEFORE_COMPRESSION) {
+  const TARGET_SIZE = targetSize || TARGET_MAX_FILE_SIZE;
+  // Check if file size is already below target, no compression needed
+  if (buffer.length < TARGET_SIZE) {
     return buffer;
   }
 
   const originalSizeMB = (buffer.length / 1024 / 1024).toFixed(2);
-  console.log(`Image is ${originalSizeMB}MB, compressing to max 5MB...`);
+  const targetSizeMB = (TARGET_SIZE / 1024 / 1024).toFixed(2);
+  console.log(`Image is ${originalSizeMB}MB, compressing to max ${targetSizeMB}MB...`);
 
   try {
     const metadata = await sharp(buffer).metadata();
@@ -54,7 +59,7 @@ export async function compressImageIfNeeded(
     const maxAttempts = 20; // Prevent infinite loops
 
     // Progressive compression: reduce quality first, then resize if needed
-    while (currentBuffer.length > TARGET_MAX_FILE_SIZE && attempts < maxAttempts) {
+    while (currentBuffer.length > TARGET_SIZE && attempts < maxAttempts) {
       attempts++;
       let sharpInstance = sharp(currentBuffer === buffer ? buffer : currentBuffer);
       
@@ -88,19 +93,20 @@ export async function compressImageIfNeeded(
       const currentSizeMB = (currentBuffer.length / 1024 / 1024).toFixed(2);
       
       // If still too large, reduce quality more aggressively
-      if (currentBuffer.length > TARGET_MAX_FILE_SIZE && quality > 30) {
+      if (currentBuffer.length > TARGET_SIZE && quality > 30) {
         quality -= attempts <= 3 ? 10 : 5;
         console.log(`Compressed to ${currentSizeMB}MB, reducing quality to ${quality}...`);
-      } else if (currentBuffer.length <= TARGET_MAX_FILE_SIZE) {
+      } else if (currentBuffer.length <= TARGET_SIZE) {
         console.log(`✅ Compression complete: ${currentSizeMB}MB (was ${originalSizeMB}MB)`);
         break;
       }
     }
 
     // If still too large after all attempts, return the best compression we got
-    if (currentBuffer.length > TARGET_MAX_FILE_SIZE) {
+    if (currentBuffer.length > TARGET_SIZE) {
       const finalSizeMB = (currentBuffer.length / 1024 / 1024).toFixed(2);
-      console.log(`⚠️ Warning: Could not compress below 5MB. Final size: ${finalSizeMB}MB`);
+      const targetSizeMBFinal = (TARGET_SIZE / 1024 / 1024).toFixed(2);
+      console.log(`⚠️ Warning: Could not compress below ${targetSizeMBFinal}MB. Final size: ${finalSizeMB}MB`);
       // Try one last aggressive resize
       if (width > 640 && height > 480) {
         try {

@@ -80,6 +80,12 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ["firebase", "firebase-admin"],
   },
+
+  // Increase body size limit for API routes (default is 1MB, increase to 50MB)
+  // Note: Vercel functions have their own limits (4.5MB for Hobby, 50MB for Pro)
+  serverRuntimeConfig: {
+    maxRequestBodySize: 50 * 1024 * 1024, // 50MB
+  },
 };
 
 export default nextConfig;

@@ -84,7 +84,7 @@ export default function BetaTesterPage() {
       const recheckLimit = async () => {
         try {
           const maxLimit = await getMaxBetaTesters();
-          if (maxLimit !== null && maxLimit > 0) {
+          if (maxLimit !== null && maxLimit > 0 && db) {
             const betaTestersCollection = collection(db, "betaTesters");
             const countSnapshot = await getCountFromServer(betaTestersCollection);
             const currentCount = countSnapshot.data().count;
@@ -145,7 +145,7 @@ export default function BetaTesterPage() {
 
       // Check max beta testers limit BEFORE registering
       const maxBetaTesters = await getMaxBetaTesters();
-      if (maxBetaTesters !== null && maxBetaTesters > 0) {
+      if (maxBetaTesters !== null && maxBetaTesters > 0 && db) {
         // Count current beta testers (including this user if they're about to register)
         const betaTestersCollection = collection(db, "betaTesters");
         const countSnapshot = await getCountFromServer(betaTestersCollection);

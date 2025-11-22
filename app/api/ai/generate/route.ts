@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { AI_ENDPOINT_CREATE, pollAiResult } from "@/lib/ai";
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { compressImageIfNeeded } from "@/lib/image-utils";
+
+// Export runtime config for Vercel
+// Note: Body size limit is handled by Vercel (4.5MB Hobby, 50MB Pro)
+// We compress images before base64 to stay under limits
+export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minutes for Vercel Pro, 10s for Hobby
 
 // Initialize Firebase for server-side
 const firebaseConfig = {
@@ -94,12 +101,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert image to base64
-    console.log("Converting image to base64...");
+    // Compress image BEFORE converting to base64 to reduce payload size
+    console.log(`Original image size: ${(imageFile.size / 1024 / 1024).toFixed(2)}MB`);
     const arrayBuffer = await imageFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    let buffer = Buffer.from(arrayBuffer);
+    
+    // Compress image if it's large (base64 adds ~33% size, so we compress to ~3MB to stay under 4.5MB base64)
+    // For Vercel Hobby plan: limit is 4.5MB, so compressed image should be max ~3MB (becomes ~4MB in base64)
+    // For Vercel Pro plan: limit is 50MB, but we still compress to avoid issues
+    const MAX_BASE64_SIZE = 3 * 1024 * 1024; // 3MB (becomes ~4MB in base64)
+    if (buffer.length > MAX_BASE64_SIZE) {
+      console.log("Compressing image before base64 conversion (target: 3MB)...");
+      // Use more aggressive compression for base64 (target 3MB instead of 5MB)
+      buffer = await compressImageIfNeeded(buffer, imageFile.type || "image/jpeg", MAX_BASE64_SIZE);
+      console.log(`Compressed image size: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
+    }
+    
+    // Convert compressed image to base64
+    console.log("Converting compressed image to base64...");
     const base64Image = buffer.toString("base64");
-    console.log("Base64 image length:", base64Image.length);
+    console.log("Base64 image length:", base64Image.length, `(${(base64Image.length / 1024 / 1024).toFixed(2)}MB)`);
 
     // Build prompt with style
     const size = "2160x3840 pixels";
