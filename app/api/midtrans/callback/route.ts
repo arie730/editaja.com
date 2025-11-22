@@ -23,12 +23,23 @@ const verifySignature = (orderId: string, statusCode: string, grossAmount: strin
   return hash === signatureKey;
 };
 
+// Support both POST (notification) and GET (testing/ping)
+export async function GET(request: NextRequest) {
+  return NextResponse.json({ 
+    ok: true, 
+    message: "Midtrans callback endpoint is active",
+    timestamp: new Date().toISOString()
+  });
+}
+
 export async function POST(request: NextRequest) {
   let notification: any = null;
   let orderId: string = "unknown";
   
   try {
     console.log("=== Midtrans Callback Received ===");
+    console.log("Request method:", request.method);
+    console.log("Request headers:", Object.fromEntries(request.headers.entries()));
     
     // Get Midtrans config
     const midtransConfig = await getMidtransConfig();
@@ -40,11 +51,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse notification body
-    notification = await request.json();
-    orderId = notification.order_id || "unknown";
-    console.log("Notification data:", JSON.stringify(notification, null, 2));
-    console.log(`Order ID from notification: ${orderId}`);
+    // Parse notification body - Midtrans sends JSON in body
+    try {
+      notification = await request.json();
+      orderId = notification.order_id || "unknown";
+      console.log("Notification data:", JSON.stringify(notification, null, 2));
+      console.log(`Order ID from notification: ${orderId}`);
+    } catch (parseError: any) {
+      console.error("Error parsing notification body:", parseError);
+      // Try to get from query params as fallback
+      const { searchParams } = new URL(request.url);
+      orderId = searchParams.get("order_id") || "unknown";
+      console.log(`Using order_id from query params: ${orderId}`);
+      
+      if (orderId === "unknown") {
+        throw new Error("Failed to parse notification body and no order_id in query params");
+      }
+    }
 
     // Verify signature (optional - only if provided)
     const signatureKey = request.headers.get("x-midtrans-signature");
@@ -68,9 +91,17 @@ export async function POST(request: NextRequest) {
       console.log("No signature provided - continuing without verification");
     }
 
-    // orderId already set above
+    // Validate notification has required fields
+    if (!notification || !notification.order_id) {
+      console.error("Invalid notification: missing order_id");
+      return NextResponse.json(
+        { ok: false, error: "Invalid notification: missing order_id" },
+        { status: 400 }
+      );
+    }
+
     const transactionStatus = notification.transaction_status;
-    const fraudStatus = notification.fraud_status;
+    const fraudStatus = notification.fraud_status || "unknown";
 
     console.log(`Processing order: ${orderId}, status: ${transactionStatus}, fraud: ${fraudStatus}`);
 

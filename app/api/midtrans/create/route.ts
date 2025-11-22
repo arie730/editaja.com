@@ -84,7 +84,15 @@ export async function POST(request: NextRequest) {
     // Save transaction to Firestore (using server-side function)
     let transactionId: string;
     try {
-      console.log(`Saving transaction to Firestore: orderId=${orderId}, userId=${userId}`);
+      console.log(`=== SAVING TRANSACTION TO FIRESTORE ===`);
+      console.log(`Order ID: ${orderId}`);
+      console.log(`User ID: ${userId}`);
+      console.log(`User Email: ${userEmail || "N/A"}`);
+      console.log(`Package ID: ${packageId}`);
+      console.log(`Diamonds: ${diamonds}`);
+      console.log(`Bonus: ${bonus || 0}`);
+      console.log(`Price: ${price}`);
+      
       transactionId = await saveTopupTransactionServer({
         userId,
         userEmail,
@@ -95,21 +103,33 @@ export async function POST(request: NextRequest) {
         status: "pending",
         orderId,
       });
-      console.log(`Transaction saved successfully: transactionId=${transactionId}, orderId=${orderId}`);
+      console.log(`✅ Transaction saved successfully: transactionId=${transactionId}, orderId=${orderId}`);
+      console.log(`=== TRANSACTION SAVE COMPLETE ===`);
     } catch (error: any) {
-      // If Admin SDK is not available, we can't save transaction server-side
-      // In this case, we'll still create the payment token but transaction won't be saved
-      // Client should save it after payment success
-      console.error("Failed to save transaction (Admin SDK may not be configured):", error);
-      console.error("Error details:", error.message, error.stack);
+      // CRITICAL: If Admin SDK is not available, transaction cannot be saved
+      // This means callback won't be able to find transaction and add diamonds!
+      console.error("❌ CRITICAL ERROR: Failed to save transaction to Firestore");
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+      console.error("⚠️ This means:");
+      console.error("  1. Payment will be created in Midtrans");
+      console.error("  2. BUT callback won't find transaction in Firestore");
+      console.error("  3. AND diamonds won't be added to user account");
+      console.error("");
+      console.error("🔧 SOLUTION: Setup Firebase Admin SDK");
+      console.error("  - Set FIREBASE_SERVICE_ACCOUNT environment variable in Vercel");
+      console.error("  - See FIREBASE-ADMIN-SETUP.md for instructions");
+      console.error("");
       
-      // For now, we'll use a temporary ID
-      // In production, you should setup Firebase Admin SDK
-      transactionId = `temp-${orderId}`;
-      
-      // Log warning but continue with payment creation
-      console.warn("Transaction not saved to Firestore. Setup Firebase Admin SDK for full functionality.");
-      console.warn("Payment will be created but callback won't be able to update transaction status.");
+      // Return error - don't continue without saving transaction
+      return NextResponse.json(
+        { 
+          ok: false, 
+          error: "Failed to save transaction. Please contact administrator. Error: " + error.message,
+          details: "Firebase Admin SDK may not be configured. Check server logs for details."
+        },
+        { status: 500 }
+      );
     }
 
     // Prepare Midtrans payment request
